@@ -1,0 +1,67 @@
+# healthylinkx-a2a-server
+A2A interface to Healthylinkx functionality instead of an API. Allows integration with LLM apps and agents.
+
+Healthylinkx helps you find doctors with the help of your social network. Think of Healthylinkx as a combination of Yelp, Linkedin and Facebook.
+
+Healthylinkx is an early prototype that combines open data of doctors and specialists from the US Department of Health. It allows you to search for doctors based on location, specialization, genre or name.
+
+Healthylinx is a classic three tiers app: front-end (ux), service API and data store. This architecture makes it very adequate to test different technologies and I use it for getting my hands dirty on new stuff.
+
+This repo replaces the Healthylinkx API with a A2A Server. With this new interface you can integrate Healthylinkx with any LLM powered app or agent. 
+
+We use different AWS resources: RDS for the datastore and Lambda for the MCP Server.
+
+To know more about the datastore this repo has more details https://github.com/mulargui/healthylinkx-mysql.git
+
+This repo is based on similar work done to support MCP in Healthylinkx: https://github.com/mulargui/healthylinkx-mcp-server.git
+
+Kudos on building this A2A interface goes to Claude Code. I didn't write a single line of code. I used Claude Code as a experienced colleague and guided him on the process of creating and debugging the code. We started from the code used for MCP and Claude Code easily created a new endpoint to support A2A. We used A2A Inspector to test the A2A Server, more about A2A Inspector here: https://github.com/a2aproject/a2a-inspector. Several issues surfaced during testing and Claude Code was able to fix them all provided with good directions and context data. I highly recommend to use plan mode that forces Claude to think deeply.
+
+## A2A Protocol Support
+
+This repo now includes support for the Agent-to-Agent (A2A) protocol. The A2A protocol, originally developed by Google and now maintained by the Linux Foundation, enables AI agents to communicate and collaborate with each other.
+
+The A2A server runs as a separate AWS Lambda function, implements JSON-RPC 2.0 over HTTPS and exposes the same doctor search functionality through a natural language interface.
+
+### A2A Endpoints
+
+- **Agent Card (Metadata)**: `GET /.well-known/agent.json`
+- **JSON-RPC Endpoint**: `POST /a2a`
+- **Health Check**: `GET /health`
+
+### Example A2A Request
+
+```bash
+curl -X POST https://[a2a-lambda-url]/a2a \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "message/send",
+    "params": {
+      "message": "Find female cardiologist named Johnson in 90210"
+    },
+    "id": "1"
+  }'
+```
+
+### Supported A2A Methods
+
+- `message/send` - Synchronous doctor search with natural language queries
+
+### Message Format
+
+Natural language queries are parsed to extract search parameters. Examples:
+- "Find doctors named Smith in 10001"
+- "Search for female cardiologist in zipcode 90210"
+- "Find doctors named Johnson"
+
+**Files and directories:**
+
+/docs - Documentation of the code (partial) generated automatically.\
+/a2a/src - code of the A2A Agent Server.\
+/a2a/infra - code to deploy and delete the A2A Server using the AWS SDK for node.js.\
+/datastore/infra - code to create and delete the RDS MySQL database.\
+/config.json - Configuration values for A2A and datastore.\
+/deploy.sh and remove.sh - shellscripts to deploy or remove all the infrastructure from/to AWS.\
+
+Enjoy playing with A2A!!!

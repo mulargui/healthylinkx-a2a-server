@@ -1,0 +1,13 @@
+{
+  "a2a": {
+    "functionName": "a2a-lambda",
+    "roleName": "a2a-lambda-role",
+    "agentName": "HealthyLinkx Doctor Search Agent",
+    "agentVersion": "1.0.0",
+    "debug": true
+  },
+  "datastore": {
+    "user":"root",
+    "passwd": "awsdatastore"
+  }
+}
