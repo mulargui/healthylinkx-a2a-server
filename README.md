@@ -67,4 +67,5 @@ Natural language queries are parsed to extract search parameters. Examples:
 Enjoy playing with A2A!!!
 
 ### Update 1/19/2026
-I created (and merged) the remove_express branch to remove the use of express web server and the use of AWS Lambda Web Adapter to route Lambda requests to the web server. Now the code is leaner and theoretically faster. Kudos again to Claude code for the changes and the new code.
+* First update. I created (and merged) the remove_express branch to remove the use of express web server and the use of AWS Lambda Web Adapter to route Lambda requests to the web server. Now the code is leaner and theoretically faster. Kudos again to Claude code for the changes and the new code.
+* Second update. I created (and merged) the a2a-js branch to use the a2a-js library (part of the standard a2a protocol) instead of managing messages in raw format. It took Claude Code about 7 minutes to build a plan. It didn't know the a2a-js library and researched the web (several sites and github repos) to learn about it. It succeeded at the first attempt - very impressive! It is tested with a2a-inspector.
