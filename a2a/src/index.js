@@ -340,26 +340,33 @@ export async function handler(event, context) {
   const path = event.rawPath || '/';
   const method = event.requestContext?.http?.method || 'GET';
 
-  console.log(`[handler] ${method} ${path}`);
+  console.log(`[handler] Incoming request: ${method} ${path}`);
+  console.log(`[handler] Headers:`, JSON.stringify(event.headers || {}));
 
   // Route requests
   if (method === 'GET' && path === '/.well-known/agent.json') {
+    console.log(`[handler] Routing to handleAgentCard`);
     return handleAgentCard(event);
   }
 
   if (method === 'POST' && path === '/a2a') {
+    console.log(`[handler] Routing to handleA2AEndpoint`);
     return await handleA2AEndpoint(event);
   }
 
   if (method === 'GET' && path === '/health') {
+    console.log(`[handler] Routing to handleHealthCheck`);
     return handleHealthCheck();
   }
 
   if (method === 'GET' && path === '/') {
+    console.log(`[handler] Routing to redirect`);
     return createRedirect('/.well-known/agent.json');
   }
 
   // 404 Not Found
+  console.error(`[handler] 404 Not Found: ${method} ${path}`);
+  console.error(`[handler] Available routes: GET /.well-known/agent.json, POST /a2a, GET /health, GET /`);
   return createResponse(404, {
     error: 'Not Found',
     path: path,
