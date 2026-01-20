@@ -1,4 +1,3 @@
-import express from 'express';
 import { SearchDoctors } from './healthylinkx.js';
 import fs from 'fs';
 import path from 'path';
@@ -132,18 +131,53 @@ async function executeDoctorSearch(params) {
   };
 }
 
-// Create Express app
-const app = express();
-app.use(express.json());
+// Response helper functions
 
-// Agent card endpoint (metadata discovery)
-app.get('/.well-known/agent.json', (req, res) => {
+/**
+ * Create a JSON response with the given status code and body
+ * @param {number} statusCode - HTTP status code
+ * @param {object} body - Response body object
+ * @returns {object} Lambda response object
+ */
+function createResponse(statusCode, body) {
+  return {
+    statusCode,
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(body)
+  };
+}
+
+/**
+ * Create a redirect response
+ * @param {string} location - Redirect URL
+ * @returns {object} Lambda response object
+ */
+function createRedirect(location) {
+  return {
+    statusCode: 302,
+    headers: {
+      'Location': location
+    },
+    body: ''
+  };
+}
+
+// Route handlers
+
+/**
+ * Handle GET /.well-known/agent.json - Agent card endpoint
+ * @param {object} event - Lambda event object
+ * @returns {object} Lambda response with agent card
+ */
+function handleAgentCard(event) {
   // Derive the agent URL from the request
-  const protocol = req.get('x-forwarded-proto') || req.protocol;
-  const host = req.get('host');
+  const host = event.headers?.host || event.requestContext?.domainName;
+  const protocol = event.headers?.['x-forwarded-proto'] || 'https';
   const agentUrl = `${protocol}://${host}/a2a`;
 
-  res.json({
+  return createResponse(200, {
     name: AGENT_NAME,
     version: AGENT_VERSION,
     description: 'Search for doctors in the HealthyLinkx directory using natural language queries',
@@ -173,20 +207,39 @@ app.get('/.well-known/agent.json', (req, res) => {
       ]
     }
   });
-});
+}
 
-// A2A JSON-RPC endpoint
-app.post('/a2a', async (req, res) => {
-  console.log('[/a2a] incoming request body:', JSON.stringify(req.body));
+/**
+ * Handle POST /a2a - A2A JSON-RPC endpoint
+ * @param {object} event - Lambda event object
+ * @returns {Promise<object>} Lambda response with JSON-RPC result
+ */
+async function handleA2AEndpoint(event) {
+  let body;
   try {
-    const { jsonrpc, method, params, id } = req.body;
+    body = JSON.parse(event.body || '{}');
+  } catch {
+    return createResponse(400, {
+      jsonrpc: '2.0',
+      error: {
+        code: -32700,
+        message: 'Parse error: Invalid JSON'
+      },
+      id: null
+    });
+  }
+
+  console.log('[/a2a] incoming request body:', JSON.stringify(body));
+
+  try {
+    const { jsonrpc, method, params, id } = body;
     console.log('[/a2a] parsed - jsonrpc:', jsonrpc, 'method:', method, 'id:', id);
     console.log('[/a2a] params:', JSON.stringify(params));
 
     // Validate JSON-RPC 2.0 format
     if (jsonrpc !== '2.0') {
       console.log('[/a2a] invalid jsonrpc version');
-      return res.json({
+      return createResponse(200, {
         jsonrpc: '2.0',
         error: {
           code: -32600,
@@ -204,7 +257,7 @@ app.post('/a2a', async (req, res) => {
 
       if (searchResult.error) {
         console.log('[/a2a] returning error response');
-        return res.json({
+        return createResponse(200, {
           jsonrpc: '2.0',
           error: searchResult.error,
           id
@@ -219,7 +272,7 @@ app.post('/a2a', async (req, res) => {
       const messageId = `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
       // Format response as A2A Task with proper Message structure
-      return res.json({
+      return createResponse(200, {
         jsonrpc: '2.0',
         result: {
           id: taskId,
@@ -240,7 +293,7 @@ app.post('/a2a', async (req, res) => {
 
     // Method not found
     console.log('[/a2a] method not found:', method);
-    return res.json({
+    return createResponse(200, {
       jsonrpc: '2.0',
       error: {
         code: -32601,
@@ -252,40 +305,64 @@ app.post('/a2a', async (req, res) => {
   } catch (error) {
     console.error('[/a2a] CAUGHT ERROR:', error.message);
     console.error('[/a2a] STACK:', error.stack);
-    return res.json({
+    return createResponse(200, {
       jsonrpc: '2.0',
       error: {
         code: -32603,
         message: 'Internal server error',
         data: config.a2a.debug ? error.message : undefined
       },
-      id: req.body.id || null
+      id: body.id || null
     });
   }
-});
+}
 
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.json({
+/**
+ * Handle GET /health - Health check endpoint
+ * @returns {object} Lambda response with health status
+ */
+function handleHealthCheck() {
+  return createResponse(200, {
     status: 'healthy',
     service: 'a2a-agent',
     name: AGENT_NAME,
     version: AGENT_VERSION
   });
-});
+}
 
-// Root endpoint - redirect to agent card
-app.get('/', (req, res) => {
-  res.redirect('/.well-known/agent.json');
-});
+/**
+ * Main Lambda handler
+ * @param {object} event - Lambda Function URL event
+ * @param {object} context - Lambda context
+ * @returns {Promise<object>} Lambda response
+ */
+export async function handler(event, context) {
+  const path = event.rawPath || '/';
+  const method = event.requestContext?.http?.method || 'GET';
 
-// Listen on port 8080 for Lambda Web Adapter, 3000 locally
-const port = process.env.AWS_LAMBDA_FUNCTION_NAME ? 8080 : 3000;
-app.listen(port, () => {
-  console.log(`A2A Agent Server (${AGENT_NAME}) running on port ${port}`);
-  console.log(`Agent card: http://localhost:${port}/.well-known/agent.json`);
-  console.log(`A2A endpoint: http://localhost:${port}/a2a`);
-}).on('error', error => {
-  console.error('A2A Server error:', error);
-  process.exit(1);
-});
+  console.log(`[handler] ${method} ${path}`);
+
+  // Route requests
+  if (method === 'GET' && path === '/.well-known/agent.json') {
+    return handleAgentCard(event);
+  }
+
+  if (method === 'POST' && path === '/a2a') {
+    return await handleA2AEndpoint(event);
+  }
+
+  if (method === 'GET' && path === '/health') {
+    return handleHealthCheck();
+  }
+
+  if (method === 'GET' && path === '/') {
+    return createRedirect('/.well-known/agent.json');
+  }
+
+  // 404 Not Found
+  return createResponse(404, {
+    error: 'Not Found',
+    path: path,
+    method: method
+  });
+}

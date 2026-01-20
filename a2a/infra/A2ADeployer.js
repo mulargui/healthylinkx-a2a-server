@@ -8,6 +8,7 @@ import {
   LambdaClient,
   CreateFunctionCommand,
   UpdateFunctionCodeCommand,
+  UpdateFunctionConfigurationCommand,
   CreateFunctionUrlConfigCommand,
   UpdateFunctionUrlConfigCommand,
   GetFunctionUrlConfigCommand,
@@ -230,25 +231,32 @@ export default class A2ADeployer {
         FunctionName: this.FUNCTION_NAME,
         Runtime: "nodejs22.x",
         Role: roleArn,
-        Handler: "run.sh",
+        Handler: "index.handler",
         Code: { ZipFile: zipBuffer },
         Timeout: 30,
-        MemorySize: 128,
-        Environment: {
-          Variables: { // Environment Variables
-            "AWS_LAMBDA_EXEC_WRAPPER": "/opt/bootstrap"
-          },
-        },
-        Layers: [ // LayerList
-          `arn:aws:lambda:${this.REGION}:753240598075:layer:LambdaAdapterLayerX86:25`
-        ]
+        MemorySize: 128
       });
 
       await lambda.send(createFunctionCommand);
       console.log("Lambda function created successfully");
     } catch (error) {
       if (error.name === "ResourceConflictException") {
-        console.log("Lambda function already exists. Updating code...");
+        console.log("Lambda function already exists. Updating configuration and code...");
+
+        // Update configuration (handler, remove layers and env vars)
+        const updateConfigCommand = new UpdateFunctionConfigurationCommand({
+          FunctionName: this.FUNCTION_NAME,
+          Handler: "index.handler",
+          Environment: { Variables: {} },
+          Layers: []
+        });
+        await lambda.send(updateConfigCommand);
+        console.log("Lambda function configuration updated successfully");
+
+        // Wait for config update to complete
+        await new Promise(resolve => setTimeout(resolve, 5000));
+
+        // Update code
         const updateFunctionCodeCommand = new UpdateFunctionCodeCommand({
           FunctionName: this.FUNCTION_NAME,
           ZipFile: zipBuffer
