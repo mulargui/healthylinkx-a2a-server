@@ -65,3 +65,6 @@ Natural language queries are parsed to extract search parameters. Examples:
 /deploy.sh and remove.sh - shellscripts to deploy or remove all the infrastructure from/to AWS.\
 
 Enjoy playing with A2A!!!
+
+### Update 1/19/2026
+I created (and merged) the remove_express branch to remove the use of express web server and the use of AWS Lambda Web Adapter to route Lambda requests to the web server. Now the code is leaner and theoretically faster. Kudos again to Claude code for the changes and the new code.

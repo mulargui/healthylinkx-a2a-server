@@ -167,7 +167,7 @@ function createRedirect(location) {
 // Route handlers
 
 /**
- * Handle GET /.well-known/agent.json - Agent card endpoint
+ * Handle GET /.well-known/agent-card.json - Agent card endpoint
  * @param {object} event - Lambda event object
  * @returns {object} Lambda response with agent card
  */
@@ -344,7 +344,7 @@ export async function handler(event, context) {
   console.log(`[handler] Headers:`, JSON.stringify(event.headers || {}));
 
   // Route requests
-  if (method === 'GET' && path === '/.well-known/agent.json') {
+  if (method === 'GET' && path === '/.well-known/agent-card.json') {
     console.log(`[handler] Routing to handleAgentCard`);
     return handleAgentCard(event);
   }
@@ -361,12 +361,12 @@ export async function handler(event, context) {
 
   if (method === 'GET' && path === '/') {
     console.log(`[handler] Routing to redirect`);
-    return createRedirect('/.well-known/agent.json');
+    return createRedirect('/.well-known/agent-card.json');
   }
 
   // 404 Not Found
   console.error(`[handler] 404 Not Found: ${method} ${path}`);
-  console.error(`[handler] Available routes: GET /.well-known/agent.json, POST /a2a, GET /health, GET /`);
+  console.error(`[handler] Available routes: GET /.well-known/agent-card.json, POST /a2a, GET /health, GET /`);
   return createResponse(404, {
     error: 'Not Found',
     path: path,
