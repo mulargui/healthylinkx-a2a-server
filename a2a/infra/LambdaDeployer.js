@@ -1,7 +1,7 @@
 /**
- * @fileoverview Lambda deployment module for the A2A agent.
+ * @fileoverview Lambda deployment module for the Healthylinkx A2A server.
  * This module provides a class for deploying and updating Lambda functions.
- * @module A2ADeployer
+ * @module LambdaDeployer
  */
 
 import {
@@ -24,17 +24,17 @@ import util from 'util';
 const writeFileAsync = util.promisify(fs.writeFile);
 
 /**
- * Class representing a Lambda function deployer for A2A agent.
+ * Class representing a Lambda function deployer.
  */
-export default class A2ADeployer {
+export default class LambdaDeployer {
   /**
-   * Create an A2ADeployer.
+   * Create a LambdaDeployer.
    */
   constructor() {
     // Read the config file
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = path.dirname(__filename);
-    const configPath = path.join(__dirname, '../..', 'config.json')
+    const configPath = path.join(__dirname, '../..', 'config.json');
     const rawConfig = fs.readFileSync(configPath);
     const config = JSON.parse(rawConfig);
 
@@ -100,6 +100,12 @@ export default class A2ADeployer {
       PolicyArn: "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
     }));
 
+    // NOTE: kept consistent with MCP lambda for now.
+    await iam.send(new AttachRolePolicyCommand({
+      RoleName: roleName,
+      PolicyArn: "arn:aws:iam::aws:policy/AmazonBedrockFullAccess"
+    }));
+
     await iam.send(new AttachRolePolicyCommand({
       RoleName: roleName,
       PolicyArn: "arn:aws:iam::aws:policy/AmazonRDSFullAccess"
@@ -134,6 +140,7 @@ export default class A2ADeployer {
       });
       const response = await lambda.send(updateFunctionUrlCommand);
       console.log("Function URL updated:", response.FunctionUrl);
+      return response.FunctionUrl;
     } catch (error) {
       if (error.name === "ResourceNotFoundException") {
         // If it doesn't exist, create it
@@ -151,6 +158,7 @@ export default class A2ADeployer {
         });
         const response = await lambda.send(createFunctionUrlCommand);
         console.log("Function URL created:", response.FunctionUrl);
+        return response.FunctionUrl;
       } else {
         throw error;
       }
@@ -158,6 +166,10 @@ export default class A2ADeployer {
 
     // Add permission for public access
     await this.addFunctionUrlPermission(functionName);
+
+    // Return the URL (if it already existed, fetch it)
+    const existing = await lambda.send(new GetFunctionUrlConfigCommand({ FunctionName: functionName }));
+    return existing.FunctionUrl;
   }
 
   /**
@@ -201,7 +213,7 @@ export default class A2ADeployer {
       const lambda = new LambdaClient({ region: this.REGION });
       const response = await lambda.send(command);
 
-      // Save the function URL to lambdaurl.json
+      // Save the function URL to lambdaurl.json (written into the infra working directory)
       const lambdaurl = { LAMBDA_FUNCTION_URL: response.FunctionUrl };
 
       await writeFileAsync('lambdaurl.json', JSON.stringify(lambdaurl, null, 2));
@@ -234,29 +246,15 @@ export default class A2ADeployer {
         Handler: "index.handler",
         Code: { ZipFile: zipBuffer },
         Timeout: 30,
-        MemorySize: 128
+        MemorySize: 128,
+        Environment: { Variables: {} }
       });
 
       await lambda.send(createFunctionCommand);
       console.log("Lambda function created successfully");
     } catch (error) {
       if (error.name === "ResourceConflictException") {
-        console.log("Lambda function already exists. Updating configuration and code...");
-
-        // Update configuration (handler, remove layers and env vars)
-        const updateConfigCommand = new UpdateFunctionConfigurationCommand({
-          FunctionName: this.FUNCTION_NAME,
-          Handler: "index.handler",
-          Environment: { Variables: {} },
-          Layers: []
-        });
-        await lambda.send(updateConfigCommand);
-        console.log("Lambda function configuration updated successfully");
-
-        // Wait for config update to complete
-        await new Promise(resolve => setTimeout(resolve, 5000));
-
-        // Update code
+        console.log("Lambda function already exists. Updating code...");
         const updateFunctionCodeCommand = new UpdateFunctionCodeCommand({
           FunctionName: this.FUNCTION_NAME,
           ZipFile: zipBuffer
@@ -269,7 +267,22 @@ export default class A2ADeployer {
     }
 
     // Create or update function URL
-    await this.createFunctionUrl(this.FUNCTION_NAME);
+    const functionUrl = await this.createFunctionUrl(this.FUNCTION_NAME);
     await this.SaveUrlInConfigFile(this.FUNCTION_NAME);
+
+    // Configure the agent card base URL to match the Function URL.
+    // Trim trailing slash so we can safely append paths.
+    const normalizedUrl = functionUrl.replace(/\/+$/, '');
+    await lambda.send(
+      new UpdateFunctionConfigurationCommand({
+        FunctionName: this.FUNCTION_NAME,
+        Environment: {
+          Variables: {
+            A2A_PUBLIC_BASE_URL: normalizedUrl
+          }
+        }
+      })
+    );
+    console.log(`Updated env A2A_PUBLIC_BASE_URL=${normalizedUrl}`);
   }
 }
