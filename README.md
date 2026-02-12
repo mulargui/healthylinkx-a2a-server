@@ -69,3 +69,6 @@ Enjoy playing with A2A!!!
 ### Update 1/19/2026
 * First update. I created (and merged) the remove_express branch to remove the use of express web server and the use of AWS Lambda Web Adapter to route Lambda requests to the web server. Now the code is leaner and theoretically faster. Kudos again to Claude code for the changes and the new code.
 * Second update. I created (and merged) the a2a-js branch to use the a2a-js library (part of the standard a2a protocol) instead of managing messages in raw format. It took Claude Code about 7 minutes to build a plan. It didn't know the a2a-js library and researched the web (several sites and github repos) to learn about it. It succeeded at the first attempt - very impressive! It is tested with a2a-inspector.
+
+### Update 2/12/2026
+I did a similar exercise with Github Copilot. You can see the results in the github_copilot branch. I used GPT 5.2 for this POC. I needed to work harder to make it deployable, with many corrections to GPT. The code now deploys correctly but doesn't work, the a2a implementation is incorrect. I'm stopping here as it is taken too much time and effort to direct GPT. The code is also unnecessary complicated for my own taste. I might try in the future with GPT 5.2 codex, which should provide better results.
