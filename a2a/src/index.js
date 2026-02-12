@@ -25,6 +25,82 @@ function headerValue(headers, name) {
   return undefined;
 }
 
+function getRequestId(event, context) {
+  return (
+    context?.awsRequestId ||
+    event?.requestContext?.requestId ||
+    headerValue(event?.headers, 'x-request-id') ||
+    headerValue(event?.headers, 'x-amzn-requestid') ||
+    headerValue(event?.headers, 'x-amz-request-id') ||
+    newId('req')
+  );
+}
+
+function getLogLevel() {
+  const level = (process.env.LOG_LEVEL || 'info').toLowerCase();
+  if (['debug', 'info', 'warn', 'error'].includes(level)) return level;
+  return 'info';
+}
+
+function shouldLog(level) {
+  const order = { debug: 10, info: 20, warn: 30, error: 40 };
+  return order[level] >= order[getLogLevel()];
+}
+
+function sanitizeHeaders(headers) {
+  if (!headers || typeof headers !== 'object') return {};
+  const allow = new Set([
+    'host',
+    'user-agent',
+    'x-forwarded-for',
+    'x-forwarded-proto',
+    'x-forwarded-host',
+    'x-amzn-trace-id',
+    'x-request-id',
+    'x-amz-request-id'
+  ]);
+
+  const out = {};
+  for (const [k, v] of Object.entries(headers)) {
+    const key = k.toLowerCase();
+    if (!allow.has(key)) continue;
+    out[key] = Array.isArray(v) ? v[0] : v;
+  }
+  return out;
+}
+
+function logLine(level, message, fields = {}) {
+  if (!shouldLog(level)) return;
+  const payload = {
+    level,
+    ts: nowIso(),
+    msg: message,
+    ...fields
+  };
+
+  if (level === 'error') console.error(JSON.stringify(payload));
+  else if (level === 'warn') console.warn(JSON.stringify(payload));
+  else console.log(JSON.stringify(payload));
+}
+
+function eventSummary(event) {
+  const method = getMethod(event);
+  const path = getPath(event);
+  const query = getQueryParams(event);
+  const contentType = headerValue(event?.headers, 'content-type');
+  const body = decodeBody(event);
+
+  return {
+    method,
+    path,
+    query,
+    contentType,
+    isBase64Encoded: Boolean(event?.isBase64Encoded),
+    headers: sanitizeHeaders(event?.headers),
+    bodyBytes: typeof body === 'string' ? Buffer.byteLength(body, 'utf8') : 0
+  };
+}
+
 function getMethod(event) {
   return (
     event?.requestContext?.http?.method ||
@@ -355,13 +431,14 @@ function normalizeSendMessageBody(body) {
   return body;
 }
 
-async function handleRest(event) {
+async function handleRest(event, { requestId } = {}) {
   const method = getMethod(event);
   const path = getPath(event);
   const query = getQueryParams(event);
 
   // Agent card
   if (method === 'GET' && (path === `/${AGENT_CARD_PATH}` || path === '/a2a/rest/v1/card' || path === '/v1/card')) {
+    logLine('info', 'route', { requestId, route: 'agent-card', method, path });
     // If no A2A_PUBLIC_BASE_URL is set, we at least make the card self-consistent for this request.
     const base = getPublicBaseUrlFromEvent(event);
     const dynamicCard = {
@@ -374,13 +451,23 @@ async function handleRest(event) {
 
   // Send message
   if (method === 'POST' && (path === '/a2a/rest/v1/message:send' || path === '/v1/message:send' || path === '/message:send')) {
+    logLine('info', 'route', { requestId, route: 'message:send', method, path });
     const bodyText = decodeBody(event);
-    if (!bodyText) return jsonResponse(400, { code: -32602, message: 'Missing request body' });
+    if (!bodyText) {
+      logLine('warn', 'missing body', { requestId, method, path });
+      return jsonResponse(400, { code: -32602, message: 'Missing request body' });
+    }
 
     let body;
     try {
       body = JSON.parse(bodyText);
     } catch {
+      logLine('warn', 'invalid json', {
+        requestId,
+        method,
+        path,
+        ...(shouldLog('debug') ? { bodyPreview: bodyText.slice(0, 1024) } : {})
+      });
       throw A2AError.parseError('Invalid JSON');
     }
 
@@ -391,12 +478,14 @@ async function handleRest(event) {
 
   // Streaming not supported for Lambda native HTTP responses (SSE).
   if (method === 'POST' && (path === '/a2a/rest/v1/message:stream' || path === '/v1/message:stream' || path === '/message:stream')) {
+    logLine('info', 'route', { requestId, route: 'message:stream (unsupported)', method, path });
     return jsonResponse(400, { code: -32004, message: 'Unsupported operation: message:stream' }, { 'content-type': 'application/a2a+json' });
   }
 
   // Task: get
   const taskGetMatch = path.match(/^\/a2a\/rest\/v1\/tasks\/(.+)$/) || path.match(/^\/v1\/tasks\/(.+)$/) || path.match(/^\/tasks\/(.+)$/);
   if (method === 'GET' && taskGetMatch) {
+    logLine('info', 'route', { requestId, route: 'tasks:get', method, path });
     const id = decodeURIComponent(taskGetMatch[1]);
     const historyLength = query.historyLength != null ? Number(query.historyLength) : undefined;
     const task = await requestHandler.getTask({ id, historyLength });
@@ -406,6 +495,7 @@ async function handleRest(event) {
   // Task: cancel
   const cancelMatch = path.match(/^\/a2a\/rest\/v1\/tasks\/(.+):cancel$/) || path.match(/^\/v1\/tasks\/(.+):cancel$/) || path.match(/^\/tasks\/(.+):cancel$/);
   if (method === 'POST' && cancelMatch) {
+    logLine('info', 'route', { requestId, route: 'tasks:cancel', method, path });
     const id = decodeURIComponent(cancelMatch[1]);
     const task = await requestHandler.cancelTask({ id });
     return jsonResponse(200, task, { 'content-type': 'application/a2a+json' });
@@ -414,10 +504,12 @@ async function handleRest(event) {
   // Task: subscribe/resubscribe (streaming) not supported
   const subscribeMatch = path.match(/^\/a2a\/rest\/v1\/tasks\/(.+):subscribe$/) || path.match(/^\/v1\/tasks\/(.+):subscribe$/) || path.match(/^\/tasks\/(.+):subscribe$/);
   if (method === 'POST' && subscribeMatch) {
+    logLine('info', 'route', { requestId, route: 'tasks:subscribe (unsupported)', method, path });
     return jsonResponse(400, { code: -32004, message: 'Unsupported operation: tasks:subscribe' }, { 'content-type': 'application/a2a+json' });
   }
 
   if (method === 'OPTIONS') {
+    logLine('debug', 'route', { requestId, route: 'options', method, path });
     // Basic CORS preflight for Function URLs / API Gateway.
     return emptyResponse(204, {
       'access-control-allow-origin': '*',
@@ -426,26 +518,49 @@ async function handleRest(event) {
     });
   }
 
+  logLine('warn', 'route not found', { requestId, method, path });
   return jsonResponse(404, { code: -32601, message: `Not found: ${method} ${path}` });
 }
 
-export async function handler(event) {
+export async function handler(event, context) {
+  const requestId = getRequestId(event, context);
+  const started = Date.now();
+  logLine('info', 'request start', { requestId, ...eventSummary(event) });
   try {
-    const resp = await handleRest(event);
+    const resp = await handleRest(event, { requestId });
     // Always allow cross-origin usage since Function URLs are often used directly.
     resp.headers = {
       'access-control-allow-origin': '*',
       'access-control-allow-headers': '*',
       ...resp.headers
     };
+    logLine('info', 'request end', {
+      requestId,
+      statusCode: resp.statusCode,
+      durationMs: Date.now() - started
+    });
     return resp;
   } catch (err) {
+    logLine('error', 'request failed', {
+      requestId,
+      durationMs: Date.now() - started,
+      errorName: err?.name,
+      errorMessage: err instanceof Error ? err.message : String(err),
+      ...(err instanceof Error && err.stack ? { stack: err.stack.split('\n').slice(0, 20).join('\n') } : {}),
+      ...eventSummary(event),
+      ...(shouldLog('debug') ? { bodyPreview: (decodeBody(event) || '').slice(0, 1024) } : {})
+    });
     const resp = errorResponse(err);
     resp.headers = {
       'access-control-allow-origin': '*',
       'access-control-allow-headers': '*',
       ...resp.headers
     };
+    logLine('info', 'request end', {
+      requestId,
+      statusCode: resp.statusCode,
+      durationMs: Date.now() - started
+    });
     return resp;
   }
 }

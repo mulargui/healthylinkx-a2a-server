@@ -9,6 +9,7 @@ import {
   CreateFunctionCommand,
   UpdateFunctionCodeCommand,
   UpdateFunctionConfigurationCommand,
+  GetFunctionConfigurationCommand,
   CreateFunctionUrlConfigCommand,
   UpdateFunctionUrlConfigCommand,
   GetFunctionUrlConfigCommand,
@@ -238,6 +239,58 @@ export default class LambdaDeployer {
     const roleArn = await this.createLambdaRole();
 
     const lambda = new LambdaClient({ region: this.REGION });
+
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    const waitForLambdaReady = async () => {
+      // Wait until the function is Active and the last update (if any) is Successful.
+      // This prevents ResourceConflictException when calling UpdateFunctionConfiguration.
+      const deadlineMs = Date.now() + 90_000;
+      let delayMs = 750;
+      while (Date.now() < deadlineMs) {
+        try {
+          const cfg = await lambda.send(
+            new GetFunctionConfigurationCommand({ FunctionName: this.FUNCTION_NAME })
+          );
+
+          const state = cfg.State;
+          const lastUpdateStatus = cfg.LastUpdateStatus;
+
+          if (state === 'Active' && (!lastUpdateStatus || lastUpdateStatus === 'Successful')) {
+            return;
+          }
+        } catch (e) {
+          // If we can't read config transiently, keep waiting.
+        }
+        await sleep(delayMs);
+        delayMs = Math.min(5000, Math.round(delayMs * 1.4));
+      }
+      console.warn('Timed out waiting for Lambda to become ready; proceeding anyway.');
+    };
+
+    const sendWithConflictRetry = async (commandFactory, label) => {
+      // Retries only on ResourceConflictException (409) which Lambda throws when an update is in progress.
+      let attempt = 0;
+      let delayMs = 750;
+      // up to ~60-90 seconds worst case
+      while (attempt < 12) {
+        try {
+          await waitForLambdaReady();
+          return await lambda.send(commandFactory());
+        } catch (error) {
+          if (error && (error.name === 'ResourceConflictException' || error.Code === 'ResourceConflictException')) {
+            attempt += 1;
+            console.log(`${label} delayed (update in progress). Retrying in ${delayMs}ms...`);
+            await sleep(delayMs);
+            delayMs = Math.min(7000, Math.round(delayMs * 1.5));
+            continue;
+          }
+          throw error;
+        }
+      }
+      throw new Error(`${label} failed: Lambda remained busy (ResourceConflictException)`);
+    };
+
     try {
       const createFunctionCommand = new CreateFunctionCommand({
         FunctionName: this.FUNCTION_NAME,
@@ -266,6 +319,9 @@ export default class LambdaDeployer {
       }
     }
 
+    // Ensure the update has settled before doing subsequent configuration changes.
+    await waitForLambdaReady();
+
     // Create or update function URL
     const functionUrl = await this.createFunctionUrl(this.FUNCTION_NAME);
     await this.SaveUrlInConfigFile(this.FUNCTION_NAME);
@@ -273,15 +329,17 @@ export default class LambdaDeployer {
     // Configure the agent card base URL to match the Function URL.
     // Trim trailing slash so we can safely append paths.
     const normalizedUrl = functionUrl.replace(/\/+$/, '');
-    await lambda.send(
-      new UpdateFunctionConfigurationCommand({
-        FunctionName: this.FUNCTION_NAME,
-        Environment: {
-          Variables: {
-            A2A_PUBLIC_BASE_URL: normalizedUrl
+    await sendWithConflictRetry(
+      () =>
+        new UpdateFunctionConfigurationCommand({
+          FunctionName: this.FUNCTION_NAME,
+          Environment: {
+            Variables: {
+              A2A_PUBLIC_BASE_URL: normalizedUrl
+            }
           }
-        }
-      })
+        }),
+      'UpdateFunctionConfiguration(A2A_PUBLIC_BASE_URL)'
     );
     console.log(`Updated env A2A_PUBLIC_BASE_URL=${normalizedUrl}`);
   }
