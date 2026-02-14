@@ -4,7 +4,7 @@ import {
 } from "@aws-sdk/client-rds";
 
 import mysql from 'mysql2/promise';
-import * as fs from 'fs';
+import * as fs from 'fs'; 
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -55,15 +55,15 @@ export async function SearchDoctors(gender, lastname, specialty, zipcode){
         query += "(Provider_Short_Postal_Code = '" + zipcode + "')";
     }
     query += ") limit 25";
-
+    
     // query the datastore and return results
-    try {
+    try {        
         //URL of the datastore
         const rdsclient = new RDSClient({});
         const data = await rdsclient.send(new DescribeDBInstancesCommand({
             DBInstanceIdentifier: "healthylinkx-db"}));
         const endpoint = data.DBInstances[0].Endpoint.Address;
-
+        
         const connection = await mysql.createConnection({
             host: endpoint,
             user: DBUSER,
@@ -78,7 +78,7 @@ export async function SearchDoctors(gender, lastname, specialty, zipcode){
         return ServerReply (200, rows);
     } catch(err) {
         return ServerReply (500, ("Error accessing to the datastore with query: " + query + " and error: " + err));
-    }
+    } 
 }
 
 // use this search for locally testing the functionality of the MCP Server

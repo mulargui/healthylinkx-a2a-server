@@ -1,12 +1,12 @@
-import A2ADeployer from './A2ADeployer.js';
+import LambdaDeployer from './LambdaDeployer.js';
 
 async function main() {
-  const deployer = new A2ADeployer();
+  const deployer = new LambdaDeployer();
+
   try {
     await deployer.deployLambda();
   } catch (error) {
     console.error('A2A Deployment failed:', error);
-    process.exit(1);
   }
 }
 

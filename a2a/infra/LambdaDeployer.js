@@ -1,21 +1,20 @@
 /**
- * @fileoverview Lambda deployment module for the A2A agent.
+ * @fileoverview Lambda deployment module for the Bedrock demo app.
  * This module provides a class for deploying and updating Lambda functions.
- * @module A2ADeployer
+ * @module LambdaDeployer
  */
 
-import {
-  LambdaClient,
-  CreateFunctionCommand,
+import { 
+  LambdaClient, 
+  CreateFunctionCommand, 
   UpdateFunctionCodeCommand,
-  UpdateFunctionConfigurationCommand,
   CreateFunctionUrlConfigCommand,
   UpdateFunctionUrlConfigCommand,
   GetFunctionUrlConfigCommand,
   AddPermissionCommand
 } from "@aws-sdk/client-lambda";
 import { IAMClient, GetRoleCommand, CreateRoleCommand, AttachRolePolicyCommand } from "@aws-sdk/client-iam";
-import * as fs from 'fs';
+import * as fs from 'fs'; 
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import AdmZip from 'adm-zip';
@@ -24,11 +23,11 @@ import util from 'util';
 const writeFileAsync = util.promisify(fs.writeFile);
 
 /**
- * Class representing a Lambda function deployer for A2A agent.
+ * Class representing a Lambda function deployer.
  */
-export default class A2ADeployer {
+export default class LambdaDeployer {
   /**
-   * Create an A2ADeployer.
+   * Create a LambdaDeployer.
    */
   constructor() {
     // Read the config file
@@ -102,6 +101,11 @@ export default class A2ADeployer {
 
     await iam.send(new AttachRolePolicyCommand({
       RoleName: roleName,
+      PolicyArn: "arn:aws:iam::aws:policy/AmazonBedrockFullAccess"
+    }));
+
+    await iam.send(new AttachRolePolicyCommand({
+      RoleName: roleName,
       PolicyArn: "arn:aws:iam::aws:policy/AmazonRDSFullAccess"
     }));
   }
@@ -118,7 +122,7 @@ export default class A2ADeployer {
       // Check if function URL already exists
       const getFunctionUrlCommand = new GetFunctionUrlConfigCommand({ FunctionName: functionName });
       await lambda.send(getFunctionUrlCommand);
-
+      
       // If it exists, update it
       const updateFunctionUrlCommand = new UpdateFunctionUrlConfigCommand({
         FunctionName: functionName,
@@ -167,21 +171,42 @@ export default class A2ADeployer {
    * @throws {Error} If adding permission fails.
    */
   async addFunctionUrlPermission(functionName) {
+    const lambda = new LambdaClient({ region: this.REGION });
+
+    // 1. Add InvokeFunctionUrl permission (Required for Function URLs)
     try {
-      const lambda = new LambdaClient({ region: this.REGION });
-      const addPermissionCommand = new AddPermissionCommand({
+      const addUrlPermissionCommand = new AddPermissionCommand({
         FunctionName: functionName,
         StatementId: "FunctionURLAllowPublicAccess",
         Action: "lambda:InvokeFunctionUrl",
         Principal: "*",
         FunctionUrlAuthType: "NONE"
       });
-
-      await lambda.send(addPermissionCommand);
-      console.log("Function URL public access permission added successfully");
+      await lambda.send(addUrlPermissionCommand);
+      console.log("Function URL public access permission (InvokeFunctionUrl) added successfully");
     } catch (error) {
       if (error.name === "ResourceConflictException") {
-        console.log("Function URL permission already exists");
+        console.log("InvokeFunctionUrl permission already exists");
+      } else {
+        throw error;
+      }
+    }
+
+    // 2. Add InvokeFunction permission (Often requested by AWS Console for public URLs)
+    try {
+      const addInvokePermissionCommand = new AddPermissionCommand({
+        FunctionName: functionName,
+        StatementId: "LambdaAllowPublicInvoke",
+        Action: "lambda:InvokeFunction",
+        Principal: "*"
+      });
+      await lambda.send(addInvokePermissionCommand);
+      console.log("General public invoke permission (InvokeFunction) added successfully");
+    } catch (error) {
+      if (error.name === "ResourceConflictException") {
+        console.log("InvokeFunction permission already exists");
+      } else if (error.name === "AccessDeniedException") {
+        console.warn("AccessDenied when adding InvokeFunction permission. This is common in restricted accounts and might not be required.");
       } else {
         throw error;
       }
@@ -241,22 +266,7 @@ export default class A2ADeployer {
       console.log("Lambda function created successfully");
     } catch (error) {
       if (error.name === "ResourceConflictException") {
-        console.log("Lambda function already exists. Updating configuration and code...");
-
-        // Update configuration (handler, remove layers and env vars)
-        const updateConfigCommand = new UpdateFunctionConfigurationCommand({
-          FunctionName: this.FUNCTION_NAME,
-          Handler: "index.handler",
-          Environment: { Variables: {} },
-          Layers: []
-        });
-        await lambda.send(updateConfigCommand);
-        console.log("Lambda function configuration updated successfully");
-
-        // Wait for config update to complete
-        await new Promise(resolve => setTimeout(resolve, 5000));
-
-        // Update code
+        console.log("Lambda function already exists. Updating code...");
         const updateFunctionCodeCommand = new UpdateFunctionCodeCommand({
           FunctionName: this.FUNCTION_NAME,
           ZipFile: zipBuffer

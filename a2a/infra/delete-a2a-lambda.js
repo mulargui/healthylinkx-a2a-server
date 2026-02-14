@@ -1,17 +1,17 @@
-import {
-  LambdaClient,
+import { 
+  LambdaClient, 
   DeleteFunctionCommand,
   RemovePermissionCommand,
   DeleteFunctionUrlConfigCommand,
   GetFunctionUrlConfigCommand
 } from "@aws-sdk/client-lambda";
-import {
-  IAMClient,
-  DeleteRoleCommand,
-  DetachRolePolicyCommand,
-  ListAttachedRolePoliciesCommand
+import { 
+  IAMClient, 
+  DeleteRoleCommand, 
+  DetachRolePolicyCommand, 
+  ListAttachedRolePoliciesCommand 
 } from "@aws-sdk/client-iam";
-import * as fs from 'fs';
+import * as fs from 'fs'; 
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -50,7 +50,7 @@ async function deleteFunctionUrl(functionName) {
         console.error("Error removing function permission:", error);
       }
     }
-
+    
     // Next, delete the function URL configuration
     const deleteFunctionUrlCommand = new DeleteFunctionUrlConfigCommand({ FunctionName: functionName });
     await lambda.send(deleteFunctionUrlCommand);
