@@ -72,3 +72,6 @@ Enjoy playing with A2A!!!
 
 ### Update 2/12/2026
 I did a similar exercise with Github Copilot. You can see the results in the github_copilot branch. I used GPT 5.2 for this POC. I needed to work harder to make it deployable, with many corrections to GPT. The code now deploys correctly but doesn't work, the a2a implementation is incorrect. I'm stopping here as it is taken too much time and effort to direct GPT. The code is also unnecessary complicated for my own taste. I might try in the future with GPT 5.2 codex, which should provide better results.
+
+### Update 2/13/2026
+I also did the same exercise with Gemini 3 Pro. You can see the results in the gemini_3 branch. It was easy to work with Gemini and the code generated is quite elegant and more concise than others. Also tested with a2a-inspector.
